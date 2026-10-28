@@ -14,7 +14,7 @@ This is a **fork of a fork**:
 |---|---|---|
 | Original | © **Lucymatos** | Time Based Range concept: range box, session open, hi/lo/eq, Fibonacci levels and extensions |
 | Mod | **XeL_Arjona** | Pine v6 rewrite, extension hit-rate statistics, session excursion percentile levels, range-scaled (R) mode |
-| This fork | *[your name / handle]* | Time-picker session inputs, documentation, mean-reversion workflow |
+| This fork | *[Aidan]* | Time-picker session inputs, documentation, mean-reversion workflow |
 
 Licensed under the **Mozilla Public License 2.0**, the same license as the original work. See [License](#license).
 
