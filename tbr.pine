@@ -1,0 +1,676 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Original work and code by © Lucymatos, mods by XeL_Arjona, further mods by Aidan
+
+//@version=6
+indicator(title = "NY TBR Stat Map[XelMod]", shorttitle = "TBR+Exc", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500, max_bars_back = 5000)
+
+// =====================================================================
+// INPUTS: TIME BASED RANGE
+// =====================================================================
+
+// --- Session Settings
+session_time_levels = input.session("0400-0930", "Range Session", group = "Session Settings", tooltip = "Session used to build the range. The end is exclusive, so 09:30 includes the 09:29 bar.")
+session_time_window = input.session("0930-1130", "Extension Window", group = "Session Settings", tooltip = "How far the range levels (fibs, hi/lo/eq, open) extend to the right, AND the window over which the extension touch rates are measured. Start it where the range session ends. Must line up with the history timeframe (30m works for 09:30-11:30).")
+time_zone = input.string("America/New_York", "Time Zone", options = ["UTC", "America/New_York", "America/Chicago", "America/Los_Angeles", "Europe/London", "Asia/Tokyo"], group = "Session Settings", tooltip = "Used by the range, the extension window and the excursion session.")
+
+// --- Anchor
+show_anchor = input.bool(false, "Show Session Anchor", inline = "anchor")
+anchor_style = input.string("Dotted", "", options = ["Solid", "Dashed", "Dotted"], inline = "anchor")
+anchor_color = input.color(color.gray, "", inline = "anchor")
+anchor_width = input.int(1, "", minval = 1, maxval = 4, inline = "anchor")
+show_anchor_label = input.bool(true, "Show Anchor Label")
+
+// --- Session Open Line
+show_session_open = input.bool(true, "Show Session Open Line", inline = "session_open")
+session_open_style = input.string("Dashed", "", options = ["Solid", "Dashed", "Dotted"], inline = "session_open")
+session_open_color = input.color(color.gray, "", inline = "session_open")
+session_open_width = input.int(1, "", minval = 1, maxval = 4, inline = "session_open")
+show_session_open_label = input.bool(true, "Show Session Open Label")
+
+// --- Range Box
+show_range_box = input.bool(true, "Show Range Box", inline = "range_box")
+range_box_color = input.color(color.new(color.gray, 80), "", inline = "range_box")
+range_boxOutline_color = input.color(color.new(color.gray, 100), "", inline = "range_box")
+
+// --- Fibonacci (inside the range)
+show_fib_levels = input.bool(false, "Show Fibonacci Levels", group = "Fibonacci Settings")
+fib_color = input.color(color.green, "Fibonacci Color", group = "Fibonacci Settings")
+fib_style = input.string("Dashed", "Fibonacci Style", options = ["Solid", "Dashed", "Dotted"], group = "Fibonacci Settings")
+fib_width = input.int(1, "Fibonacci Width", minval = 1, maxval = 4, group = "Fibonacci Settings")
+show_fib_labels = input.bool(true, "Show Fibonacci Labels", group = "Fibonacci Settings")
+fib_level_1 = input.float(0.236, "Fib Level 1", minval = 0, maxval = 1, step = 0.001, group = "Fibonacci Settings")
+fib_level_2 = input.float(0.382, "Fib Level 2", minval = 0, maxval = 1, step = 0.001, group = "Fibonacci Settings")
+fib_level_3 = input.float(0.618, "Fib Level 3", minval = 0, maxval = 1, step = 0.001, group = "Fibonacci Settings")
+fib_anchor = input.string("Low", "Fibonacci Anchor", options = ["Low", "Open"], group = "Fibonacci Settings")
+
+// --- Fibonacci Extensions (projections beyond the range)
+show_fib_ext = input.bool(true, "Show Fibonacci Extensions", group = "Fibonacci Extension Settings")
+fib_ext_color = input.color(color.teal, "Fib Extension Color", group = "Fibonacci Extension Settings")
+fib_ext_style = input.string("Dotted", "Fib Extension Style", options = ["Solid", "Dashed", "Dotted"], group = "Fibonacci Extension Settings")
+fib_ext_width = input.int(1, "Fib Extension Width", minval = 1, maxval = 4, group = "Fibonacci Extension Settings")
+show_fib_ext_labels = input.bool(true, "Show Fib Extension Labels", group = "Fibonacci Extension Settings")
+fib_ext_level_1 = input.float(1.33, "Fib Ext Level 1", minval = 0, maxval = 5, step = 0.01, group = "Fibonacci Extension Settings")
+fib_ext_level_2 = input.float(1.66, "Fib Ext Level 2", minval = 0, maxval = 5, step = 0.01, group = "Fibonacci Extension Settings")
+fib_ext_level_3 = input.float(0.33, "Fib Ext Level 3", minval = 0, maxval = 5, step = 0.01, group = "Fibonacci Extension Settings")
+
+// --- Extension Hit Rate
+gH = "Extension Hit Rate"
+
+hitN = input.int(60, "Hit-rate sample (sessions)", minval = 10, maxval = 500, group = gH, tooltip = "For each past session: did price touch the extension levels beyond the range high / low during the Extension Window? Measured on the History timeframe (set under Excursion Session).")
+hitMinN = input.int(10, "Min sessions to show", minval = 3, maxval = 100, group = gH)
+show_hit_lbl = input.bool(true, "Add touch % to extension labels", group = gH, tooltip = "Uses PRIOR sessions only, so history shows what you would have seen live.")
+show_hit_table = input.bool(true, "Show hit-rate table", group = gH)
+hit_tbl_pos = input.string("Top Right", "Table position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = gH)
+
+// --- Session High / Mid / Low
+show_session_hl = input.bool(true, "Show Session High/Mid/Low Lines", inline = "session_hl", group = "Session High/Low Settings")
+session_hl_style = input.string("Dotted", "", options = ["Solid", "Dashed", "Dotted"], inline = "session_hl", group = "Session High/Low Settings")
+session_hl_color = input.color(color.yellow, "", inline = "session_hl", group = "Session High/Low Settings")
+session_hl_width = input.int(1, "", minval = 1, maxval = 4, inline = "session_hl", group = "Session High/Low Settings")
+show_session_hl_label = input.bool(true, "Show Session High/Mid/Low Labels", group = "Session High/Low Settings")
+
+// --- Display
+max_sessions = input.int(10, "Sessions to Display", minval = 1, maxval = 15, group = "Display Settings", tooltip = "How many historical range sessions keep their lines. Capped at 15 to stay under TradingView's 500 line/label limit.")
+projection_offset = input.int(8, "Projection Offset (Bars)", minval = 0, group = "Display Settings")
+label_size = input.string("Small", "Anchor Label Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = "Display Settings")
+price_precision = input.int(2, "Price Decimal Precision", minval = 0, maxval = 6, group = "Display Settings")
+
+// --- Range Label Sizes
+gZ = "Range Label Sizes"
+
+open_lbl_size = input.string("Normal", "Open label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = gZ)
+hl_lbl_size = input.string("Normal", "High / Low / Eq label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = gZ)
+fib_lbl_size = input.string("Normal", "Fib level label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = gZ)
+ext_lbl_size = input.string("Normal", "Fib extension label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = gZ)
+
+// =====================================================================
+// INPUTS: SESSION EXCURSION LEVELS
+// =====================================================================
+
+gS = "Excursion Session"
+
+sessIn = input.session("0930-1600", "Excursion Session", group = gS, tooltip = "Session whose open-to-high / open-to-low excursions are measured. Default 09:30-16:00 NY. Uses the Time Zone set under Session Settings.")
+htf = input.timeframe("30", "History timeframe", group = gS, tooltip = "History (excursions AND extension hit rates) is collected on this timeframe so the sample covers many more sessions than 1m bars allow. Must line up with the session / range / window boundaries (15 or 30 work for 09:30, 04:00 and 11:30).")
+nSess = input.int(60, "Sessions in sample", minval = 10, maxval = 500, group = gS)
+
+gV = "Excursion Scaling"
+
+scaleMode = input.string("Range (R)", "Levels based on", options = ["Raw", "Vol-adjusted", "Range (R)"], group = gV, tooltip = "Raw: percentiles of past excursions as they happened.\n\nVol-adjusted: each past excursion is divided by an EWMA of PRIOR sessions' ranges known at that session's open; levels are multiplied by today's EWMA.\n\nRange (R): each past excursion is divided by the Time Based Range (see Range Session) that was already known at that session's open; levels are multiplied by today's range. Same R units as your fib extensions, and it uses today's actual range instead of a lagging average.")
+volSpan = input.int(10, "Vol memory (sessions, EWMA span)", minval = 2, maxval = 60, group = gV, tooltip = "Only used when Vol-adjusted. Longer span = smoother and slower to react.")
+
+int scaleI = scaleMode == "Raw" ? 0 : scaleMode == "Vol-adjusted" ? 1 : 2
+
+gL = "Excursion Levels (percentile of max excursion from open)"
+
+show1 = input.bool(true, "Show", inline = "p1", group = gL)
+p1 = input.float(25.0, "Percentile", minval = 1.0, maxval = 99.9, step = 5.0, inline = "p1", group = gL, tooltip = "Percentile P of the distribution of each session's max excursion from the open. P25 is reached by about 75% of sessions, P90 by about 10%.")
+
+show2 = input.bool(true, "Show", inline = "p2", group = gL)
+p2 = input.float(50.0, "Percentile", minval = 1.0, maxval = 99.9, step = 5.0, inline = "p2", group = gL)
+
+show3 = input.bool(true, "Show", inline = "p3", group = gL)
+p3 = input.float(75.0, "Percentile", minval = 1.0, maxval = 99.9, step = 5.0, inline = "p3", group = gL)
+
+show4 = input.bool(true, "Show", inline = "p4", group = gL)
+p4 = input.float(90.0, "Percentile", minval = 1.0, maxval = 99.9, step = 5.0, inline = "p4", group = gL)
+
+showMean = input.bool(true, "Show mean (dashed)", group = gL)
+showOpen = input.bool(true, "Show excursion session open line", group = gL)
+showLbl = input.bool(true, "Show labels", group = gL)
+lblMode = input.string("Touch probability", "Level labels", options = ["Touch probability", "Percentile"], group = gL, tooltip = "Touch probability: '75% touch' means about 75% of past sessions reached that level (100 minus the percentile).\nPercentile: 'P25'.")
+exc_lbl_size = input.string("Normal", "Excursion label size", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = gL)
+
+gC = "Excursion Colors"
+
+cOpen = input.color(color.new(color.gray, 30), "Session open", group = gC)
+cU1 = input.color(color.new(color.orange, 75), "Upper level 1", group = gC)
+cU2 = input.color(color.new(color.orange, 55), "Upper level 2", group = gC)
+cU3 = input.color(color.new(color.orange, 30), "Upper level 3", group = gC)
+cU4 = input.color(color.orange, "Upper level 4", group = gC)
+cD1 = input.color(color.new(color.blue, 75), "Lower level 1", group = gC)
+cD2 = input.color(color.new(color.blue, 55), "Lower level 2", group = gC)
+cD3 = input.color(color.new(color.blue, 30), "Lower level 3", group = gC)
+cD4 = input.color(color.blue, "Lower level 4", group = gC)
+cUM = input.color(color.new(color.orange, 40), "Upper mean", group = gC)
+cDM = input.color(color.new(color.blue, 40), "Lower mean", group = gC)
+
+// =====================================================================
+// HELPERS
+// =====================================================================
+get_line_style(style_string) =>
+    style_string == "Solid" ? line.style_solid : style_string == "Dashed" ? line.style_dashed : line.style_dotted
+
+get_label_size(size_string) =>
+    size_string == "Tiny" ? size.tiny : size_string == "Small" ? size.small : size_string == "Normal" ? size.normal : size_string == "Large" ? size.large : size.huge
+
+get_label_style() =>
+    label.style_label_left
+
+format_price(price) =>
+    string fmt = price_precision > 0 ? "#." + str.repeat("0", price_precision) : "#"
+    str.tostring(price, fmt)
+
+// =====================================================================
+// HISTORY 1: EMPIRICAL QUANTILES OF SESSION EXCURSIONS (computed on htf)
+// =====================================================================
+//
+// For each completed excursion session:
+//     up = max excursion above the open, dn = max excursion below the open
+//
+// mode 0 (Raw):          store ln(high/open) and ln(open/low).
+// mode 1 (Vol-adjusted): the same, divided by an EWMA of PRIOR sessions'
+//                        ln(high/low) captured at that session's open.
+// mode 2 (Range R):      (high - open) and (open - low) in points, divided by
+//                        the most recent COMPLETED range-session range as of
+//                        that session's open (so it only uses information
+//                        available at the open). Sessions without a valid
+//                        range are skipped.
+//
+// Values only change when a session completes, so they are fixed before the
+// next session opens (no repainting).
+// =====================================================================
+
+f_excQ(string sess, string rsess, string tz, int n, float q1, float q2, float q3, float q4, int mode, float alpha) =>
+    var array<float> ups = array.new_float()
+    var array<float> dns = array.new_float()
+    var float sOpen = na
+    var float sHigh = na
+    var float sLow = na
+    var float sScale = na
+    var float sScaleR = na
+    var float ewma = na
+    var float rH = na
+    var float rL = na
+    var float rngLast = na
+
+    bool inS = not na(time(timeframe.period, sess, tz))
+    bool sStart = inS and not inS[1] and bar_index > 0
+    bool sEnd = not inS and inS[1]
+
+    // Range session tracking (needed for the Range (R) mode)
+    bool inR = not na(time(timeframe.period, rsess, tz))
+    bool rStart = inR and not inR[1] and bar_index > 0
+    bool rEnd = not inR and inR[1]
+
+    if rStart
+        rH := high
+        rL := low
+    else if inR and not na(rH)
+        rH := math.max(rH, high)
+        rL := math.min(rL, low)
+
+    if rEnd
+        rngLast := not na(rH) and rH > rL ? rH - rL : na
+        rH := na
+        rL := na
+
+    // Excursion session tracking
+    if sEnd and not na(sOpen) and sOpen > 0 and sLow > 0
+        float upEx = math.log(sHigh / sOpen)
+        float dnEx = math.log(sOpen / sLow)
+        float rng = math.log(sHigh / sLow)
+
+        if mode == 0
+            ups.push(upEx)
+            dns.push(dnEx)
+        else if mode == 1
+            if not na(sScale) and sScale > 0
+                ups.push(upEx / sScale)
+                dns.push(dnEx / sScale)
+        else
+            if not na(sScaleR) and sScaleR > 0
+                ups.push((sHigh - sOpen) / sScaleR)
+                dns.push((sOpen - sLow) / sScaleR)
+
+        if ups.size() > n
+            ups.shift()
+            dns.shift()
+
+        if rng > 0
+            ewma := na(ewma) ? rng : alpha * rng + (1.0 - alpha) * ewma
+
+        sOpen := na
+
+    if sStart
+        sOpen := open
+        sHigh := high
+        sLow := low
+        sScale := ewma
+        sScaleR := rngLast
+    else if inS and not na(sOpen)
+        sHigh := math.max(sHigh, high)
+        sLow := math.min(sLow, low)
+
+    bool ready = ups.size() >= 10
+
+    float a1 = ready ? ups.percentile_linear_interpolation(q1) : na
+    float a2 = ready ? ups.percentile_linear_interpolation(q2) : na
+    float a3 = ready ? ups.percentile_linear_interpolation(q3) : na
+    float a4 = ready ? ups.percentile_linear_interpolation(q4) : na
+    float b1 = ready ? dns.percentile_linear_interpolation(q1) : na
+    float b2 = ready ? dns.percentile_linear_interpolation(q2) : na
+    float b3 = ready ? dns.percentile_linear_interpolation(q3) : na
+    float b4 = ready ? dns.percentile_linear_interpolation(q4) : na
+    float aM = ready ? ups.avg() : na
+    float bM = ready ? dns.avg() : na
+
+    [a1, a2, a3, a4, b1, b2, b3, b4, aM, bM, ups.size(), ewma]
+
+[qU1, qU2, qU3, qU4, qD1, qD2, qD3, qD4, qUM, qDM, nUsed, qScale] = request.security(
+     syminfo.tickerid,
+     htf,
+     f_excQ(sessIn, session_time_levels, time_zone, nSess, p1, p2, p3, p4, scaleI, 2.0 / (volSpan + 1.0)),
+     lookahead = barmerge.lookahead_off
+)
+
+// =====================================================================
+// HISTORY 2: EXTENSION HIT RATES (computed on htf)
+// =====================================================================
+//
+// For each completed session: after the range ends, track the highest high
+// and lowest low through the Extension Window. At the end of the window,
+// record whether price touched range high + k*R (up) and range low - k*R
+// (down) for each of the three extension levels, where R = range size.
+// Results only change when a window completes (prior sessions only).
+// =====================================================================
+
+f_hitQ(string rsess, string wsess, string tz, int n, float k1, float k2, float k3) =>
+    var array<float> u1 = array.new_float()
+    var array<float> u2 = array.new_float()
+    var array<float> u3 = array.new_float()
+    var array<float> d1 = array.new_float()
+    var array<float> d2 = array.new_float()
+    var array<float> d3 = array.new_float()
+    var float rH = na
+    var float rL = na
+    var float rh0 = na
+    var float rl0 = na
+    var bool armed = false
+    var float mx = na
+    var float mn = na
+
+    bool inR = not na(time(timeframe.period, rsess, tz))
+    bool rStart = inR and not inR[1] and bar_index > 0
+    bool rEnd = not inR and inR[1]
+    bool inW = not na(time(timeframe.period, wsess, tz))
+    bool wEnd = not inW and inW[1]
+
+    if rStart
+        rH := high
+        rL := low
+    else if inR and not na(rH)
+        rH := math.max(rH, high)
+        rL := math.min(rL, low)
+
+    if rEnd
+        armed := not na(rH) and rH > rL
+        rh0 := rH
+        rl0 := rL
+        mx := na
+        mn := na
+        rH := na
+        rL := na
+
+    if armed and inW
+        mx := na(mx) ? high : math.max(mx, high)
+        mn := na(mn) ? low : math.min(mn, low)
+
+    if wEnd and armed
+        if not na(mx)
+            float rgv = rh0 - rl0
+            u1.push(mx >= rh0 + k1 * rgv ? 1.0 : 0.0)
+            u2.push(mx >= rh0 + k2 * rgv ? 1.0 : 0.0)
+            u3.push(mx >= rh0 + k3 * rgv ? 1.0 : 0.0)
+            d1.push(mn <= rl0 - k1 * rgv ? 1.0 : 0.0)
+            d2.push(mn <= rl0 - k2 * rgv ? 1.0 : 0.0)
+            d3.push(mn <= rl0 - k3 * rgv ? 1.0 : 0.0)
+            if u1.size() > n
+                u1.shift()
+                u2.shift()
+                u3.shift()
+                d1.shift()
+                d2.shift()
+                d3.shift()
+        armed := false
+
+    float hu1 = u1.size() > 0 ? u1.avg() : na
+    float hu2 = u2.size() > 0 ? u2.avg() : na
+    float hu3 = u3.size() > 0 ? u3.avg() : na
+    float hd1 = d1.size() > 0 ? d1.avg() : na
+    float hd2 = d2.size() > 0 ? d2.avg() : na
+    float hd3 = d3.size() > 0 ? d3.avg() : na
+
+    [hu1, hu2, hu3, hd1, hd2, hd3, u1.size()]
+
+[hu1, hu2, hu3, hd1, hd2, hd3, hitCnt] = request.security(
+     syminfo.tickerid,
+     htf,
+     f_hitQ(session_time_levels, session_time_window, time_zone, hitN, fib_ext_level_1, fib_ext_level_2, fib_ext_level_3),
+     lookahead = barmerge.lookahead_off
+)
+
+// Suffix for the extension labels, e.g. " · 34%"
+f_hitTxt(float v) =>
+    show_hit_lbl and hitCnt >= hitMinN and not na(v) ? " · " + str.tostring(math.round(v * 100)) + "%" : ""
+
+// =====================================================================
+// STATE: TIME BASED RANGE
+// =====================================================================
+// Drawing objects (history) and how many each session created
+var lns = array.new<line>()
+var lbls = array.new<label>()
+var bxs = array.new<box>()
+var anc_lns = array.new<line>()
+var anc_lbls = array.new<label>()
+var ln_counts = array.new<int>()
+var lb_counts = array.new<int>()
+var int cur_ln = 0
+var int cur_lb = 0
+var bool live = false
+
+// Range session data
+var float session_open = na
+var float session_high = na
+var float session_low = na
+var float session_mid = na
+var int session_start_bar = na
+var bool valid_session = false
+var float rng_last = na   // size of the last completed range, in points (na if invalid)
+
+// =====================================================================
+// SESSION DETECTION: TIME BASED RANGE
+// =====================================================================
+bool is_in_session_levels = not na(time(timeframe.period, session_time_levels, time_zone))
+bool is_session_start_levels = is_in_session_levels and not is_in_session_levels[1]
+bool is_session_end_levels = not is_in_session_levels and is_in_session_levels[1]
+
+bool in_window = not na(time(timeframe.period, session_time_window, time_zone))
+bool is_window_end = not in_window and in_window[1]
+
+// =====================================================================
+// DRAW FUNCTION
+// =====================================================================
+f_level(float price, int x1, int x2, color col, string sty, int wdt, string txt, bool lbl, string lsz) =>
+    line l = line.new(x1, price, x2, price, xloc = xloc.bar_index, color = col, style = get_line_style(sty), width = wdt)
+    array.push(lns, l)
+    if lbl
+        label lb = label.new(x2, price, txt, xloc = xloc.bar_index, yloc = yloc.price, style = get_label_style(), color = color.new(col, 100), textcolor = col, size = get_label_size(lsz))
+        array.push(lbls, lb)
+    l
+
+// =====================================================================
+// RANGE SESSION TRACKING
+// =====================================================================
+if is_session_start_levels
+    session_open := open
+    session_high := high
+    session_low := low
+    session_mid := (high + low) / 2
+    session_start_bar := bar_index
+    // A session that begins on the first loaded bar may be truncated, so it is ignored
+    valid_session := bar_index > 0
+    live := false
+    if show_anchor and valid_session
+        line a_ln = line.new(bar_index, session_open, bar_index, session_open + syminfo.mintick, xloc = xloc.bar_index, extend = extend.both, color = anchor_color, style = get_line_style(anchor_style), width = anchor_width)
+        array.push(anc_lns, a_ln)
+        while array.size(anc_lns) > max_sessions
+            line.delete(array.shift(anc_lns))
+        if show_anchor_label
+            label a_lb = label.new(bar_index, session_open, "Anchor - " + format_price(session_open), style = get_label_style(), color = color.new(anchor_color, 100), textcolor = anchor_color, size = get_label_size(label_size))
+            array.push(anc_lbls, a_lb)
+            while array.size(anc_lbls) > max_sessions
+                label.delete(array.shift(anc_lbls))
+else if is_in_session_levels
+    session_high := math.max(session_high, high)
+    session_low := math.min(session_low, low)
+    session_mid := (session_high + session_low) / 2
+
+// Size of the last completed range (feeds the Range (R) excursion scaling)
+if is_session_end_levels
+    rng_last := valid_session and not na(session_high) and not na(session_low) and session_high > session_low ? session_high - session_low : na
+
+// =====================================================================
+// RANGE END: draw this session's levels
+// =====================================================================
+if is_session_end_levels and valid_session and not na(session_high) and not na(session_low)
+    float rng = session_high - session_low
+    int x1 = bar_index
+    int x2 = bar_index + projection_offset
+
+    // Range box
+    if show_range_box
+        array.push(bxs, box.new(left = session_start_bar, top = session_high, right = bar_index - 1, bottom = session_low, bgcolor = range_box_color, border_color = range_boxOutline_color))
+        while array.size(bxs) > max_sessions
+            box.delete(array.shift(bxs))
+
+    int ln0 = array.size(lns)
+    int lb0 = array.size(lbls)
+
+    // Session open
+    if show_session_open
+        f_level(session_open, x1, x2, session_open_color, session_open_style, session_open_width, "OPEN", show_session_open_label, open_lbl_size)
+
+    // Session high / low / mid
+    if show_session_hl
+        f_level(session_high, x1, x2, session_hl_color, session_hl_style, session_hl_width, "Hi ", show_session_hl_label, hl_lbl_size)
+        f_level(session_low, x1, x2, session_hl_color, session_hl_style, session_hl_width, "Lo ", show_session_hl_label, hl_lbl_size)
+        f_level(session_mid, x1, x2, session_hl_color, session_hl_style, session_hl_width, "Eq", show_session_hl_label, hl_lbl_size)
+
+    // Fibonacci levels inside the range
+    if show_fib_levels
+        float fib_base = fib_anchor == "Low" ? session_low : session_open
+        float fib_1 = fib_base + rng * fib_level_1
+        float fib_2 = fib_base + rng * fib_level_2
+        float fib_3 = fib_base + rng * fib_level_3
+        f_level(fib_1, x1, x2, fib_color, fib_style, fib_width, str.tostring(fib_level_1), show_fib_labels, fib_lbl_size)
+        f_level(fib_2, x1, x2, fib_color, fib_style, fib_width, str.tostring(fib_level_2), show_fib_labels, fib_lbl_size)
+        f_level(fib_3, x1, x2, fib_color, fib_style, fib_width, str.tostring(fib_level_3), show_fib_labels, fib_lbl_size)
+
+    // Fibonacci extensions beyond the range (labels carry the historical touch %)
+    if show_fib_ext
+        f_level(session_high + rng * fib_ext_level_1, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "+" + str.tostring(fib_ext_level_1) + " R" + f_hitTxt(hu1), show_fib_ext_labels, ext_lbl_size)
+        f_level(session_low - rng * fib_ext_level_1, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "-" + str.tostring(fib_ext_level_1) + " R" + f_hitTxt(hd1), show_fib_ext_labels, ext_lbl_size)
+        f_level(session_high + rng * fib_ext_level_2, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "+" + str.tostring(fib_ext_level_2) + " R" + f_hitTxt(hu2), show_fib_ext_labels, ext_lbl_size)
+        f_level(session_low - rng * fib_ext_level_2, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "-" + str.tostring(fib_ext_level_2) + " R" + f_hitTxt(hd2), show_fib_ext_labels, ext_lbl_size)
+        f_level(session_high + rng * fib_ext_level_3, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "+" + str.tostring(fib_ext_level_3) + " R" + f_hitTxt(hu3), show_fib_ext_labels, ext_lbl_size)
+        f_level(session_low - rng * fib_ext_level_3, x1, x2, fib_ext_color, fib_ext_style, fib_ext_width, "-" + str.tostring(fib_ext_level_3) + " R" + f_hitTxt(hd3), show_fib_ext_labels, ext_lbl_size)
+
+    // Remember how many objects this session created, then drop the oldest sessions
+    cur_ln := array.size(lns) - ln0
+    cur_lb := array.size(lbls) - lb0
+    array.push(ln_counts, cur_ln)
+    array.push(lb_counts, cur_lb)
+    while array.size(ln_counts) > max_sessions
+        int n_old = array.shift(ln_counts)
+        while n_old > 0
+            line.delete(array.shift(lns))
+            n_old -= 1
+    while array.size(lb_counts) > max_sessions
+        int m_old = array.shift(lb_counts)
+        while m_old > 0
+            label.delete(array.shift(lbls))
+            m_old -= 1
+
+    live := true
+
+// =====================================================================
+// KEEP THE LIVE SESSION'S LINES EXTENDING THROUGH THE WINDOW
+// =====================================================================
+if live and in_window
+    if cur_ln > 0
+        int nl = array.size(lns)
+        for i = 1 to cur_ln
+            line.set_x2(array.get(lns, nl - i), bar_index + projection_offset)
+    if cur_lb > 0
+        int nb = array.size(lbls)
+        for i = 1 to cur_lb
+            label.set_x(array.get(lbls, nb - i), bar_index + projection_offset)
+
+// =====================================================================
+// WINDOW END: freeze the lines
+// =====================================================================
+if is_window_end and live
+    if cur_ln > 0
+        int nl = array.size(lns)
+        for i = 1 to cur_ln
+            line.set_x2(array.get(lns, nl - i), bar_index)
+    if cur_lb > 0
+        int nb = array.size(lbls)
+        for i = 1 to cur_lb
+            label.set_x(array.get(lbls, nb - i), bar_index)
+    live := false
+
+// =====================================================================
+// EXCURSION TODAY: LOCK LEVELS AT SESSION OPEN
+// =====================================================================
+//
+// Raw:           level = open * exp(+/- q)
+// Vol-adjusted:  level = open * exp(+/- q * scale),  scale = today's EWMA range
+// Range (R):     level = open +/- q * range,  range = last completed range
+//                (already final on the bar the excursion session opens)
+// =====================================================================
+
+bool inSess = not na(time(timeframe.period, sessIn, time_zone))
+bool sessStart = inSess and not inSess[1]
+
+// Last bar of the most recent excursion session (labels sit at the end of the plotted lines)
+var int sessLastBar = na
+if inSess
+    sessLastBar := bar_index
+
+float sc = scaleI == 1 ? qScale : 1.0
+
+var float sOpenC = na
+var float scLock = na
+var float lU1 = na
+var float lU2 = na
+var float lU3 = na
+var float lU4 = na
+var float lD1 = na
+var float lD2 = na
+var float lD3 = na
+var float lD4 = na
+var float lUM = na
+var float lDM = na
+
+if sessStart
+    sOpenC := open
+    scLock := sc
+    if scaleI == 2
+        lU1 := open + qU1 * rng_last
+        lU2 := open + qU2 * rng_last
+        lU3 := open + qU3 * rng_last
+        lU4 := open + qU4 * rng_last
+        lD1 := open - qD1 * rng_last
+        lD2 := open - qD2 * rng_last
+        lD3 := open - qD3 * rng_last
+        lD4 := open - qD4 * rng_last
+        lUM := open + qUM * rng_last
+        lDM := open - qDM * rng_last
+    else
+        lU1 := open * math.exp(qU1 * sc)
+        lU2 := open * math.exp(qU2 * sc)
+        lU3 := open * math.exp(qU3 * sc)
+        lU4 := open * math.exp(qU4 * sc)
+        lD1 := open * math.exp(-qD1 * sc)
+        lD2 := open * math.exp(-qD2 * sc)
+        lD3 := open * math.exp(-qD3 * sc)
+        lD4 := open * math.exp(-qD4 * sc)
+        lUM := open * math.exp(qUM * sc)
+        lDM := open * math.exp(-qDM * sc)
+
+// =====================================================================
+// EXCURSION PLOTS
+// =====================================================================
+
+plot(inSess and showOpen ? sOpenC : na, "Exc session open", color = cOpen, style = plot.style_linebr, linewidth = 1)
+
+plot(inSess and show1 ? lU1 : na, "Upper level 1", color = cU1, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show2 ? lU2 : na, "Upper level 2", color = cU2, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show3 ? lU3 : na, "Upper level 3", color = cU3, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show4 ? lU4 : na, "Upper level 4", color = cU4, style = plot.style_linebr, linewidth = 2)
+
+plot(inSess and show1 ? lD1 : na, "Lower level 1", color = cD1, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show2 ? lD2 : na, "Lower level 2", color = cD2, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show3 ? lD3 : na, "Lower level 3", color = cD3, style = plot.style_linebr, linewidth = 1)
+plot(inSess and show4 ? lD4 : na, "Lower level 4", color = cD4, style = plot.style_linebr, linewidth = 2)
+
+plot(inSess and showMean ? lUM : na, "Upper mean", color = cUM, style = plot.style_linebr, linewidth = 1, linestyle = plot.linestyle_dashed)
+plot(inSess and showMean ? lDM : na, "Lower mean", color = cDM, style = plot.style_linebr, linewidth = 1, linestyle = plot.linestyle_dashed)
+
+// =====================================================================
+// EXCURSION RIGHT-EDGE LABELS
+// =====================================================================
+
+f_lbl(label lb, bool show, int xv, float yv, string txt, color c) =>
+    if show and not na(yv)
+        label.set_xy(lb, xv, yv)
+        label.set_size(lb, get_label_size(exc_lbl_size))
+        label.set_text(lb, txt)
+        label.set_textcolor(lb, color.new(c, 0))
+    else
+        label.set_text(lb, "")
+
+f_newLbl() =>
+    label.new(bar_index, na, "", style = label.style_label_left, color = color.new(color.white, 100), size = size.small)
+
+// "75% touch ↑" or "P25 ↑"
+f_pLbl(float p, string arrow) =>
+    lblMode == "Touch probability" ? str.tostring(100.0 - p, "#.#") + "% touch " + arrow : "P" + str.tostring(p, "#.#") + " " + arrow
+
+var label lbO = f_newLbl()
+var label lbU1 = f_newLbl()
+var label lbU2 = f_newLbl()
+var label lbU3 = f_newLbl()
+var label lbU4 = f_newLbl()
+var label lbD1 = f_newLbl()
+var label lbD2 = f_newLbl()
+var label lbD3 = f_newLbl()
+var label lbD4 = f_newLbl()
+var label lbUM = f_newLbl()
+var label lbDM = f_newLbl()
+
+if barstate.islast
+    // Labels used to show only while the LAST bar was inside the excursion session, so they
+    // vanished outside 09:30-16:00. Now they stay at the end of the latest session.
+    bool on = showLbl and not na(sessLastBar)
+    int lx = inSess ? bar_index + 2 : math.max(sessLastBar + 2, bar_index - 4500)
+
+    string scaleTxt = scaleI == 0 ? " · raw" : scaleI == 1 ? " · vol-adj, scale " + str.tostring(scLock * 100, "#.00") + "%" : " · range-scaled, R = " + (na(rng_last) ? "n/a" : str.tostring(rng_last, "#.00") + " pts")
+    string openTxt = "Open · n=" + str.tostring(nUsed) + scaleTxt
+
+    f_lbl(lbO, on and showOpen, lx, sOpenC, openTxt, cOpen)
+    f_lbl(lbU1, on and show1, lx, lU1, f_pLbl(p1, "↑"), cU1)
+    f_lbl(lbU2, on and show2, lx, lU2, f_pLbl(p2, "↑"), cU2)
+    f_lbl(lbU3, on and show3, lx, lU3, f_pLbl(p3, "↑"), cU3)
+    f_lbl(lbU4, on and show4, lx, lU4, f_pLbl(p4, "↑"), cU4)
+    f_lbl(lbD1, on and show1, lx, lD1, f_pLbl(p1, "↓"), cD1)
+    f_lbl(lbD2, on and show2, lx, lD2, f_pLbl(p2, "↓"), cD2)
+    f_lbl(lbD3, on and show3, lx, lD3, f_pLbl(p3, "↓"), cD3)
+    f_lbl(lbD4, on and show4, lx, lD4, f_pLbl(p4, "↓"), cD4)
+    f_lbl(lbUM, on and showMean, lx, lUM, "Mean ↑", cUM)
+    f_lbl(lbDM, on and showMean, lx, lDM, "Mean ↓", cDM)
+
+// =====================================================================
+// EXTENSION HIT-RATE TABLE
+// =====================================================================
+var table hit_tbl = table.new(hit_tbl_pos == "Top Right" ? position.top_right : hit_tbl_pos == "Top Left" ? position.top_left : hit_tbl_pos == "Bottom Right" ? position.bottom_right : position.bottom_left, 3, 4, border_width = 1)
+
+f_hcell(int r, string a, string b, string c, bool hdr) =>
+    color bg = hdr ? color.new(color.gray, 30) : color.new(color.black, 35)
+    table.cell(hit_tbl, 0, r, a, text_color = color.white, bgcolor = bg, text_halign = text.align_left, text_size = size.small)
+    table.cell(hit_tbl, 1, r, b, text_color = color.white, bgcolor = bg, text_size = size.small)
+    table.cell(hit_tbl, 2, r, c, text_color = color.white, bgcolor = bg, text_size = size.small)
+
+f_pctTxt(float v) =>
+    na(v) ? "-" : str.tostring(math.round(v * 100)) + "%"
+
+f_hrow(int r, float k, float up, float dn) =>
+    bool enough = hitCnt >= hitMinN
+    f_hcell(r, "±" + str.tostring(k) + " R", enough ? f_pctTxt(up) : "n<" + str.tostring(hitMinN), enough ? f_pctTxt(dn) : "", false)
+
+if show_hit_table and barstate.islast
+    f_hcell(0, "Ext touch rate (n=" + str.tostring(hitCnt) + ")", "Up", "Down", true)
+    f_hrow(1, fib_ext_level_1, hu1, hd1)
+    f_hrow(2, fib_ext_level_2, hu2, hd2)
+    f_hrow(3, fib_ext_level_3, hu3, hd3)
