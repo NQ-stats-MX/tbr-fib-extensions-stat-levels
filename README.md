@@ -2,7 +2,7 @@
 
 A TradingView **Pine Script v6** overlay indicator for **mean reversion trading off a Time Based Range (TBR)**. It draws a range you define, projects Fibonacci extensions beyond it, and adds historical statistics: how often price actually reaches each extension, and percentile bands for the session's maximum excursion from the open. This lets you judge levels by probability instead of by eye.
 
-Built and tuned for **NQ / MNQ futures**. It works on any symbol with regular intraday sessions.
+Built and tuned for **NQ / MNQ futures**. However, it works on any symbol with regular intraday sessions.
 
 ---
 
@@ -203,7 +203,7 @@ Run the chart on **1m** for execution and let the History timeframe handle the s
 
 This work is subject to the terms of the **Mozilla Public License 2.0** (https://mozilla.org/MPL/2.0/).
 
-Original work and code © **Lucymatos**. Modifications by **XeL_Arjona**. Further modifications by *[your name / handle]*.
+Original work and code © **Lucymatos**. Modifications by **XeL_Arjona**. Further modifications by **Aidan**.
 
 ## Disclaimer
 
